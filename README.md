@@ -107,14 +107,6 @@ Existing monitoring solutions are either too complex (requiring dedicated teams)
 
 ## What's Next
 
-This project started focused on AWS Snowball devices but has evolved into a general-purpose on-premises monitoring solution. We're continuously improving based on real-world usage and feedback.
-
-**Planned enhancements:**
-- Terraform modules for automated deployment
-- Additional alert channels (Slack, Teams, PagerDuty)
-- Performance metrics and dashboards
-- Multi-region deployment guides
+This project started focused on AWS Snowball devices but has evolved into a general-purpose on-premises monitoring solution. See TODO doc for things i still need to finish or add.
 
 ---
-
-*Simple monitoring for complex infrastructure. Because knowing is better than guessing.*
