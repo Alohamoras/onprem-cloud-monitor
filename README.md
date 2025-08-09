@@ -35,16 +35,16 @@ This project provides **four different approaches** to monitor your on-premises 
 
 We provide four different implementation options, each with distinct advantages:
 
-### Option 1: EC2 + Bash Script
-**Best for:** Most users, especially those new to AWS monitoring
+### Option 3: SSM Hybrid Agents
+**Best for:** Organizations already using AWS Systems Manager
 
-- **How it works:** Simple bash script running on a small EC2 instance
-- **Cost:** ~$5/month
-- **Complexity:** Low - just bash, netcat, and AWS CLI
-- **Pros:** Easy to understand, debug, and modify
-- **Cons:** Requires managing an EC2 instance
+- **How it works:** CloudWatch agent on on-premises VM with SSM hybrid activation
+- **Cost:** ~$15-30/month
+- **Complexity:** Medium - requires SSM hybrid setup
+- **Pros:** Lowest code solution, remote access capabilities
+- **Cons:** More initial setup, requires on-premises VM
 
-[📖 View EC2 Documentation](./option-1-ec2-bash/README.md)
+[📖 View SSM Documentation](./option-3-ssm-agents/README.md)
 
 ### Option 2: Lambda Serverless
 **Best for:** Cost optimization and serverless-first organizations
@@ -57,16 +57,16 @@ We provide four different implementation options, each with distinct advantages:
 
 [📖 View Lambda Documentation](./option-2-serverless/lamda-deployment-guide.md)
 
-### Option 3: SSM Hybrid Agents
-**Best for:** Organizations already using AWS Systems Manager
+### Option 3: EC2 + Bash Script
+**Best for:** Most users, especially those new to AWS monitoring
 
-- **How it works:** CloudWatch agent on on-premises VM with SSM hybrid activation
-- **Cost:** ~$15-30/month
-- **Complexity:** Medium - requires SSM hybrid setup
-- **Pros:** Lowest code solution, remote access capabilities
-- **Cons:** More initial setup, requires on-premises VM
+- **How it works:** Simple bash script running on a small EC2 instance
+- **Cost:** ~$5/month
+- **Complexity:** Low - just bash, netcat, and AWS CLI
+- **Pros:** Easy to understand, debug, and modify
+- **Cons:** Requires managing an EC2 instance
 
-[📖 View SSM Documentation](./option-3-ssm-agents/README.md)
+[📖 View EC2 Documentation](./option-1-ec2-bash/README.md)
 
 ### Option 4: On-Premises Only
 **Best for:** Air-gapped environments or locations without reliable cloud connectivity
