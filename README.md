@@ -1,18 +1,8 @@
 # On-Premises System Monitor
 
-I wanted a solution to monitor my on-prem server and the connection to the AWS cloud.  If either goes down I want an email alert.  There a lot of solutions out there for this, I wanted something as simple and reliable as possible.  There are many options for how to achomplish this and trade offs to consider.
+A simple, reliable monitoring solution for AWS customers who need immediate alerts when their on-premises infrastructure goes offline. Get notified within minutes of outages due to power failures, hardware issues, or network problems.
 
-A simple, reliable monitoring solution that helps AWS customers keep track of critical systems at remote locations. When your on-premises infrastructure goes down due to power outages, hardware failures, or network issues, you need to know immediately - not hours later when someone notices.
-
-## The Problem We Solve
-
-**Remote locations are hard to monitor.** Whether you're running edge computing, retail locations, manufacturing sites, or field offices, system outages at remote sites can go undetected for hours. By the time someone notices, you've lost valuable time, data, or revenue.
-
-**Traditional monitoring is complex.** Most monitoring solutions require extensive setup, ongoing maintenance, and specialized knowledge. When you have dozens or hundreds of remote locations, complexity becomes your enemy.
-
-**You need alerts that actually work.** Simple ping checks aren't enough. You need intelligent monitoring that can distinguish between temporary network blips and real outages, with alerts that reach the right people through the channels they actually use.
-
-## Our Solution
+## Quick Overview
 
 This project provides **four different approaches** to monitor your on-premises systems, each designed for different scenarios and technical requirements. All solutions focus on simplicity, reliability, and cost-effectiveness.
 
@@ -23,26 +13,23 @@ This project provides **four different approaches** to monitor your on-premises 
 - ✅ **Cost-effective** - Solutions range from $5-50/month regardless of how many locations you monitor
 - ✅ **Production-ready** - Includes logging, error handling, and health monitoring
 
-## Who This Is For
-
-- **AWS customers** with on-premises locations connected to the cloud
-- **System administrators** who need immediate notification of outages
-- **DevOps teams** managing distributed infrastructure
-- **Business stakeholders** who want visibility into remote site availability
-- **Anyone** who values simplicity over complexity in monitoring solutions
+## Perfect For
+- **AWS customers** with on-premises locations needing uptime monitoring
+- **System administrators** who want immediate outage notifications  
+- **Teams** managing distributed infrastructure on a budget
+- **Organizations** valuing simplicity over complex monitoring platforms
 
 ## Monitoring Approaches
-
 We provide four different implementation options, each with distinct advantages:
 
-### Option 3: SSM Hybrid Agents
+### Option 1: SSM Hybrid Agents
 **Best for:** Organizations already using AWS Systems Manager
 
 - **How it works:** CloudWatch agent on on-premises VM with SSM hybrid activation
 - **Cost:** ~$15-30/month
 - **Complexity:** Medium - requires SSM hybrid setup
 - **Pros:** Lowest code solution, remote access capabilities
-- **Cons:** More initial setup, requires on-premises VM
+- **Cons:** More initial setup, requires on-premises VM, could be difficult to scale
 
 [📖 View SSM Documentation](./option-3-ssm-agents/README.md)
 
@@ -63,7 +50,7 @@ We provide four different implementation options, each with distinct advantages:
 - **How it works:** Simple bash script running on a small EC2 instance
 - **Cost:** ~$5/month
 - **Complexity:** Low - just bash, netcat, and AWS CLI
-- **Pros:** Easy to understand, debug, and modify
+- **Pros:** Easy to understand, debug and modify, one 
 - **Cons:** Requires managing an EC2 instance
 
 [📖 View EC2 Documentation](./option-1-ec2-bash/README.md)
@@ -101,14 +88,6 @@ CloudWatch Alarms → SNS Topic → Email/SMS/Slack Alerts
 
 Option 4 uses direct SMTP for simpler, cloud-independent alerting.
 
-## Use Cases
-
-- **Retail locations** - Monitor point-of-sale systems and network connectivity
-- **Manufacturing sites** - Track critical equipment and production systems
-- **Edge computing** - Ensure remote compute resources stay online
-- **Field offices** - Monitor essential business systems and connectivity
-- **IoT deployments** - Keep track of edge gateways and data collection points
-- **Disaster recovery** - Monitor backup sites and failover systems
 
 ## Why We Built This
 
