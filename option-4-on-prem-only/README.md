@@ -1,0 +1,1 @@
+This option will use a script on an on-prem server that will send smtp alerts to a local email server.
