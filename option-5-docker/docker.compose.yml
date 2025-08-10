@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Basic heartbeat monitoring container
+  heartbeat-monitor:
+    build: .
+    # image: onprem-monitor:latest  # Use this instead of build if using pre-built image
+    container_name: heartbeat-monitor
+    restart: unless-stopped
+    environment:
+      # AWS Configuration (REQUIRED)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      
+      # Container Configuration
+      - CONTAINER_NAME=${CONTAINER_NAME:-datacenter-1}
+      - HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-300}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ContainerMonitoring/Heartbeat}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # Health Endpoint (optional)
+      - ENABLE_HEALTH_ENDPOINT=true
+      - HEALTH_PORT=8080
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "health_check.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Target monitoring container (monitors specific devices/services)
+  target-monitor:
+    build: .
+    # image: onprem-monitor:latest
+    container_name: target-monitor
+    restart: unless-stopped
+    environment:
+      # AWS Configuration (REQUIRED)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      
+      # Container Configuration
+      - CONTAINER_NAME=${CONTAINER_NAME:-snowball-monitor}
+      - HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-120}
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-ContainerMonitoring/Heartbeat}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # Target Monitoring (monitors external devices/services)
+      - MONITOR_TARGETS=${MONITOR_TARGETS:-10.0.1.100,10.0.1.101,10.0.1.102}
+      - TARGET_PORT=${TARGET_PORT:-8443}
+      - TARGET_TIMEOUT=${TARGET_TIMEOUT:-5}
+      
+      # Health Endpoint
+      - ENABLE_HEALTH_ENDPOINT=true
+      - HEALTH_PORT=8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "python", "health_check.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
