@@ -2,8 +2,8 @@
 # Generated on Sun Aug 10 16:30:48 EDT 2025
 
 AWS_REGION=us-east-1
-CONTAINER_NAME=macbooktest
-SNS_TOPIC_ARN=arn:aws:sns:us-east-1:192356349305:snow-updates
+CONTAINER_NAME=mymonitor
+SNS_TOPIC_ARN=arn:aws:sns:us-east-1:192356341234:you-sns-topic
 CLOUDWATCH_NAMESPACE=ContainerMonitoring/Heartbeat
 
 # Created Alarms:
