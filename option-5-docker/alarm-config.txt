@@ -1,0 +1,11 @@
+# CloudWatch Alarms Configuration
+# Generated on Sun Aug 10 16:30:48 EDT 2025
+
+AWS_REGION=us-east-1
+CONTAINER_NAME=macbooktest
+SNS_TOPIC_ARN=arn:aws:sns:us-east-1:192356349305:snow-updates
+CLOUDWATCH_NAMESPACE=ContainerMonitoring/Heartbeat
+
+# Created Alarms:
+# - Container-Heartbeat-Lost-macbooktest
+# - Container-Target-Offline-macbooktest

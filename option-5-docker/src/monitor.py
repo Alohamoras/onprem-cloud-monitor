@@ -46,10 +46,11 @@ class ContainerMonitor:
                 'cloudwatch',
                 region_name=self.config['aws_region'],
                 aws_access_key_id=self.config.get('aws_access_key_id'),
-                aws_secret_access_key=self.config.get('aws_secret_access_key')
+                aws_secret_access_key=self.config.get('aws_secret_access_key'),
+                aws_session_token=self.config.get('aws_session_token')
             )
             # Test credentials
-            self.cloudwatch.list_metrics(MaxRecords=1)
+            self.cloudwatch.list_metrics()
             logger.info("AWS CloudWatch client initialized successfully")
         except NoCredentialsError:
             logger.error("AWS credentials not found. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
@@ -67,6 +68,7 @@ class ContainerMonitor:
             # Required AWS configuration
             'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
             'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
+            'aws_session_token': os.getenv('AWS_SESSION_TOKEN'),
             'aws_region': os.getenv('AWS_REGION', 'us-east-1'),
             
             # Container identification
