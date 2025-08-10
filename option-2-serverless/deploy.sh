@@ -176,17 +176,32 @@ fi
 # Step 4: Create Lambda deployment package
 echo -e "${BLUE}Step 4: Creating Lambda deployment package...${NC}"
 
-# Create temporary directory
-TEMP_DIR=$(mktemp -d)
-cd $TEMP_DIR
+# Get the absolute path of the script directory BEFORE changing directories
+ORIGINAL_DIR=$(pwd)
+SCRIPT_DIR="$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")"
 
-# Copy the Lambda function
-if [[ -f "$(dirname $0)/on-prem-monitor.py" ]]; then
-    cp "$(dirname $0)/on-prem-monitor.py" lambda_function.py
+# Find the Lambda function file
+LAMBDA_SOURCE=""
+if [[ -f "$SCRIPT_DIR/on-prem-monitor.py" ]]; then
+    LAMBDA_SOURCE="$SCRIPT_DIR/on-prem-monitor.py"
+    echo "Found Lambda function in script directory"
+elif [[ -f "$ORIGINAL_DIR/option-2-serverless/on-prem-monitor.py" ]]; then
+    LAMBDA_SOURCE="$ORIGINAL_DIR/option-2-serverless/on-prem-monitor.py"
+    echo "Found Lambda function in option-2-serverless directory"
 else
-    echo -e "${RED}Error: on-prem-monitor.py not found in script directory${NC}"
+    echo -e "${RED}Error: on-prem-monitor.py not found${NC}"
+    echo "Current directory: $ORIGINAL_DIR"
+    echo "Script directory: $SCRIPT_DIR"
+    echo "Looking for file in these locations:"
+    echo "  - $SCRIPT_DIR/on-prem-monitor.py"
+    echo "  - $ORIGINAL_DIR/option-2-serverless/on-prem-monitor.py"
     exit 1
 fi
+
+# Create temporary directory and copy file
+TEMP_DIR=$(mktemp -d)
+cd $TEMP_DIR
+cp "$LAMBDA_SOURCE" lambda_function.py
 
 # Create deployment package
 zip on-prem-monitor.zip lambda_function.py
@@ -205,7 +220,7 @@ if check_resource_exists "Lambda Function" "$FUNCTION_NAME" "aws lambda get-func
     
     aws lambda update-function-configuration \
         --function-name $FUNCTION_NAME \
-        --environment Variables="{TARGET_DEVICES=$TARGET_DEVICES,TARGET_PORT=$TARGET_PORT,TIMEOUT=$TIMEOUT}"
+        --environment "Variables={TARGET_DEVICES=\"$TARGET_DEVICES\",TARGET_PORT=\"$TARGET_PORT\",TIMEOUT=\"$TIMEOUT\"}"
 else
     echo "Creating new Lambda function..."
     aws lambda create-function \
@@ -217,7 +232,7 @@ else
         --timeout 60 \
         --memory-size 128 \
         --description "On-premises device connectivity monitoring" \
-        --environment Variables="{TARGET_DEVICES=$TARGET_DEVICES,TARGET_PORT=$TARGET_PORT,TIMEOUT=$TIMEOUT}"
+        --environment "Variables={TARGET_DEVICES=\"$TARGET_DEVICES\",TARGET_PORT=\"$TARGET_PORT\",TIMEOUT=\"$TIMEOUT\"}"
 fi
 
 echo -e "${GREEN}Lambda function deployed${NC}"
