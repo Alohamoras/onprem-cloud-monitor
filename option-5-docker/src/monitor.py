@@ -147,7 +147,7 @@ class ContainerMonitor:
         except Exception as e:
             logger.error(f"Failed to send heartbeat: {e}")
 
-    def check_target_connectivity(self, target_ip: str) -> tuple[bool, float]:
+    def check_target_connectivity(self, target_ip: str):
         """Check connectivity to a target IP/hostname"""
         start_time = time.time()
         try:
