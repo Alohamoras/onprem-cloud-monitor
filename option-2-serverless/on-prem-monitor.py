@@ -2,24 +2,25 @@ import json
 import boto3
 import socket
 import time
+import os
 from datetime import datetime
 from typing import List, Dict, Tuple
 
-# Configuration
-SNOWBALL_DEVICES = [
-    "10.0.0.1"
-]
-SNOWBALL_PORT = 8443
-TIMEOUT = 5
+# Configuration - Environment variables with defaults
+TARGET_DEVICES = os.environ.get('TARGET_DEVICES', '10.0.0.1').split(',')
+TARGET_PORT = int(os.environ.get('TARGET_PORT', '8443'))
+TIMEOUT = int(os.environ.get('TIMEOUT', '5'))
+CLOUDWATCH_NAMESPACE = os.environ.get('CLOUDWATCH_NAMESPACE', 'OnPrem/MultiDevice')
 
 # AWS clients
 cloudwatch = boto3.client('cloudwatch')
 
 def lambda_handler(event, context):
     """
-    Main Lambda handler for Snowball monitoring
+    Main Lambda handler for on-premises device monitoring
     """
-    print(f"Starting Snowball monitoring at {datetime.now().isoformat()}")
+    print(f"Starting on-premises device monitoring at {datetime.now().isoformat()}")
+    print(f"Monitoring {len(TARGET_DEVICES)} devices: {TARGET_DEVICES}")
     
     try:
         # Check connectivity for all devices
@@ -36,7 +37,7 @@ def lambda_handler(event, context):
             'statusCode': 200,
             'body': json.dumps({
                 'timestamp': datetime.now().isoformat(),
-                'total_devices': len(SNOWBALL_DEVICES),
+                'total_devices': len(TARGET_DEVICES),
                 'online_count': online_count,
                 'offline_count': offline_count,
                 'device_status': device_results
@@ -53,9 +54,9 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': str(e)})
         }
 
-def check_device_connectivity(device_ip: str, port: int = SNOWBALL_PORT, timeout: int = TIMEOUT) -> Tuple[bool, float]:
+def check_device_connectivity(device_ip: str, port: int = TARGET_PORT, timeout: int = TIMEOUT) -> Tuple[bool, float]:
     """
-    Check if a single Snowball device is reachable
+    Check if a single on-premises device is reachable
     """
     start_time = time.time()
     
@@ -82,7 +83,8 @@ def check_all_devices() -> Dict[str, Dict]:
     """
     results = {}
     
-    for device_ip in SNOWBALL_DEVICES:
+    for device_ip in TARGET_DEVICES:
+        device_ip = device_ip.strip()  # Remove any whitespace
         is_online, duration = check_device_connectivity(device_ip)
         results[device_ip] = {
             'online': is_online,
@@ -152,7 +154,7 @@ def send_metrics(device_results: Dict[str, Dict]):
         },
         {
             'MetricName': 'TotalDevices',
-            'Value': len(SNOWBALL_DEVICES),
+            'Value': len(TARGET_DEVICES),
             'Unit': 'Count',
             'Timestamp': datetime.now()
         }
@@ -163,7 +165,7 @@ def send_metrics(device_results: Dict[str, Dict]):
         batch = metric_data[i:i+20]
         try:
             cloudwatch.put_metric_data(
-                Namespace='Snowball/MultiDevice',
+                Namespace=CLOUDWATCH_NAMESPACE,
                 MetricData=batch
             )
             print(f"Sent {len(batch)} metrics to CloudWatch")

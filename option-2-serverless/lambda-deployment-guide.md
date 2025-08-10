@@ -1,12 +1,12 @@
-# Lambda Deployment Guide for Snowball Monitor
+# Lambda Deployment Guide for On-Premises Monitor
 
 ## Overview
 
-This guide covers deploying the Snowball monitoring solution using AWS Lambda instead of EC2. The Lambda approach offers serverless scalability, reduced operational overhead, and potentially lower costs for smaller deployments.
+This guide covers deploying the on-premises monitoring solution using AWS Lambda instead of EC2. The Lambda approach offers serverless scalability, reduced operational overhead, and potentially lower costs for smaller deployments.
 
 **Key Benefits of Lambda Approach:**
 - ✅ **Serverless** - No EC2 instance to manage or patch
-- ✅ **Cost-effective** - Pay only for execution time (~$1-5/month vs ~$60/month for EC2)
+- ✅ **Cost-effective** - Pay only for execution time (~$1-16/month depending on network setup)
 - ✅ **Auto-scaling** - Handles multiple concurrent executions if needed
 - ✅ **Built-in monitoring** - CloudWatch integration and error handling
 
@@ -15,8 +15,8 @@ This guide covers deploying the Snowball monitoring solution using AWS Lambda in
 ## Prerequisites
 
 - AWS CLI configured with appropriate permissions
-- VPC with connectivity to Snowball devices
-- Understanding of Lambda and VPC networking
+- VPC with connectivity to your on-premises devices (or public internet access)
+- Basic understanding of Lambda and networking
 - Python 3.13 runtime support in your region
 
 ---
@@ -43,7 +43,7 @@ cat > lambda-cloudwatch-policy.json << 'EOF'
 }
 EOF
 
-# 2. VPC Access Policy (for Lambda in VPC)
+# 2. VPC Access Policy (for Lambda in VPC - optional)
 cat > lambda-vpc-policy.json << 'EOF'
 {
     "Version": "2012-10-17",
@@ -77,7 +77,7 @@ cat > lambda-logs-policy.json << 'EOF'
                 "logs:CreateLogStream",
                 "logs:PutLogEvents"
             ],
-            "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/snowball-monitor-*"
+            "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/on-prem-monitor*"
         }
     ]
 }
@@ -87,15 +87,15 @@ EOF
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 aws iam create-policy \
-    --policy-name SnowballLambdaCloudWatchPolicy \
+    --policy-name OnPremLambdaCloudWatchPolicy \
     --policy-document file://lambda-cloudwatch-policy.json
 
 aws iam create-policy \
-    --policy-name SnowballLambdaVPCPolicy \
+    --policy-name OnPremLambdaVPCPolicy \
     --policy-document file://lambda-vpc-policy.json
 
 aws iam create-policy \
-    --policy-name SnowballLambdaLogsPolicy \
+    --policy-name OnPremLambdaLogsPolicy \
     --policy-document file://lambda-logs-policy.json
 ```
 
@@ -120,60 +120,102 @@ EOF
 
 # Create the role
 aws iam create-role \
-    --role-name SnowballMonitorLambdaRole \
+    --role-name OnPremMonitorLambdaRole \
     --assume-role-policy-document file://lambda-trust-policy.json
 
 # Attach policies to role
 aws iam attach-role-policy \
-    --role-name SnowballMonitorLambdaRole \
-    --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/SnowballLambdaCloudWatchPolicy
+    --role-name OnPremMonitorLambdaRole \
+    --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/OnPremLambdaCloudWatchPolicy
 
 aws iam attach-role-policy \
-    --role-name SnowballMonitorLambdaRole \
-    --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/SnowballLambdaVPCPolicy
+    --role-name OnPremMonitorLambdaRole \
+    --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/OnPremLambdaLogsPolicy
 
+# Only attach VPC policy if you need VPC access
 aws iam attach-role-policy \
-    --role-name SnowballMonitorLambdaRole \
-    --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/SnowballLambdaLogsPolicy
+    --role-name OnPremMonitorLambdaRole \
+    --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/OnPremLambdaVPCPolicy
 ```
 
 ---
 
-## Step 2: Prepare Lambda Function Code
+## Step 2: Create SNS Topic for Alerts
 
-### Update Configuration in snowball-monitor-lambda.py
+### Create SNS Topic
 
-```python
-# Update this section in snowball-monitor-lambda.py
-SNOWBALL_DEVICES = [
-    "10.0.1.100",  # Replace with your Snowball IPs
-    "10.0.1.101",
-    "10.0.1.102"
-    # Add more IPs as needed
-]
-SNOWBALL_PORT = 8443  # Usually 8443 for Snowball
-TIMEOUT = 5          # Connection timeout in seconds
+```bash
+# Create SNS topic for alerts
+aws sns create-topic \
+    --name OnPrem-Monitor-Alerts \
+    --region $(aws configure get region)
+
+# Get the Topic ARN (save this for later steps)
+SNS_TOPIC_ARN=$(aws sns describe-topics \
+    --query 'Topics[?contains(TopicArn, `OnPrem-Monitor-Alerts`)].TopicArn' \
+    --output text)
+
+echo "SNS Topic ARN: $SNS_TOPIC_ARN"
 ```
+
+### Subscribe Email to Topic
+
+```bash
+# Subscribe your email to the topic
+aws sns subscribe \
+    --topic-arn $SNS_TOPIC_ARN \
+    --protocol email \
+    --notification-endpoint your-email@example.com
+
+echo "Check your email and confirm the subscription"
+```
+
+### Verify Subscription
+
+```bash
+# List subscriptions to verify
+aws sns list-subscriptions-by-topic \
+    --topic-arn $SNS_TOPIC_ARN
+
+# Test the topic (optional)
+aws sns publish \
+    --topic-arn $SNS_TOPIC_ARN \
+    --message "Test message from on-premises monitor setup" \
+    --subject "Test Alert"
+```
+
+---
+
+## Step 3: Prepare Lambda Function Code
+
+### Configure Your Devices
+
+The Lambda function uses environment variables for configuration, so you don't need to modify the code directly. You'll set these when creating the Lambda function:
+
+- `TARGET_DEVICES`: Comma-separated list of IP addresses (e.g., "10.0.1.100,10.0.1.101")
+- `TARGET_PORT`: Port to test (default: 8443)
+- `TIMEOUT`: Connection timeout in seconds (default: 5)
+- `CLOUDWATCH_NAMESPACE`: CloudWatch namespace (default: OnPrem/MultiDevice)
 
 ### Create Deployment Package
 
 ```bash
 # Create deployment directory
-mkdir snowball-lambda-deploy
-cd snowball-lambda-deploy
+mkdir on-prem-lambda-deploy
+cd on-prem-lambda-deploy
 
-# Copy your modified lambda function
-cp /path/to/snowball-monitor-lambda.py lambda_function.py
+# Copy the lambda function (assuming you're in the project root)
+cp option-2-serverless/on-prem-monitor.py lambda_function.py
 
 # Create deployment package (no external dependencies needed)
-zip snowball-monitor-lambda.zip lambda_function.py
+zip on-prem-monitor.zip lambda_function.py
 
-echo "Deployment package created: snowball-monitor-lambda.zip"
+echo "Deployment package created: on-prem-monitor.zip"
 ```
 
 ---
 
-## Step 3: Network Configuration
+## Step 4: Network Configuration (Optional)
 
 ### Option A: Private Subnet with NAT Gateway (Recommended)
 
@@ -217,27 +259,34 @@ echo "Default outbound rules allow all traffic - this is needed for AWS API call
 # Create endpoints using commands from Advanced-Networking-Guide.md
 ```
 
+**Note:** If your devices are accessible via public internet, you can skip the VPC configuration entirely and deploy Lambda without VPC settings.
+
 ---
 
-## Step 4: Deploy Lambda Function
+## Step 5: Deploy Lambda Function
 
 ### Create Lambda Function
 
 ```bash
 # Get your role ARN
-ROLE_ARN=$(aws iam get-role --role-name SnowballMonitorLambdaRole --query 'Role.Arn' --output text)
+ROLE_ARN=$(aws iam get-role --role-name OnPremMonitorLambdaRole --query 'Role.Arn' --output text)
 
-# Deploy Lambda function
+# Set your device configuration
+TARGET_DEVICES="10.0.1.100,10.0.1.101"  # Replace with your device IPs
+TARGET_PORT="8443"                       # Replace with your device port
+TIMEOUT="5"                              # Connection timeout in seconds
+
+# Deploy Lambda function (without VPC for simplicity)
 aws lambda create-function \
-    --function-name snowball-monitor \
+    --function-name on-prem-monitor \
     --runtime python3.13 \
     --role $ROLE_ARN \
     --handler lambda_function.lambda_handler \
-    --zip-file fileb://snowball-monitor-lambda.zip \
+    --zip-file fileb://on-prem-monitor.zip \
     --timeout 60 \
     --memory-size 128 \
-    --description "Snowball device connectivity monitoring" \
-    --vpc-config SubnetIds=$PRIVATE_SUBNET_ID,SecurityGroupIds=$LAMBDA_SG_ID
+    --description "On-premises device connectivity monitoring" \
+    --environment Variables="{TARGET_DEVICES=$TARGET_DEVICES,TARGET_PORT=$TARGET_PORT,TIMEOUT=$TIMEOUT}"
 
 echo "Lambda function created successfully"
 ```
@@ -257,32 +306,32 @@ aws lambda update-function-configuration \
 
 ---
 
-## Step 5: Set Up EventBridge Scheduling
+## Step 6: Set Up EventBridge Scheduling
 
 ### Create EventBridge Rule
 
 ```bash
 # Create rule for every 2 minutes
 aws events put-rule \
-    --name snowball-monitor-schedule \
+    --name on-prem-monitor-schedule \
     --schedule-expression "rate(2 minutes)" \
-    --description "Trigger Snowball monitoring every 2 minutes"
+    --description "Trigger on-premises monitoring every 2 minutes"
 
 # Get Lambda function ARN
-LAMBDA_ARN=$(aws lambda get-function --function-name snowball-monitor --query 'Configuration.FunctionArn' --output text)
+LAMBDA_ARN=$(aws lambda get-function --function-name on-prem-monitor --query 'Configuration.FunctionArn' --output text)
 
 # Add Lambda as target
 aws events put-targets \
-    --rule snowball-monitor-schedule \
+    --rule on-prem-monitor-schedule \
     --targets "Id"="1","Arn"="$LAMBDA_ARN"
 
 # Grant EventBridge permission to invoke Lambda
 aws lambda add-permission \
-    --function-name snowball-monitor \
+    --function-name on-prem-monitor \
     --statement-id allow-eventbridge \
     --action lambda:InvokeFunction \
     --principal events.amazonaws.com \
-    --source-arn arn:aws:events:$(aws configure get region):${ACCOUNT_ID}:rule/snowball-monitor-schedule
+    --source-arn arn:aws:events:$(aws configure get region):${ACCOUNT_ID}:rule/on-prem-monitor-schedule
 
 echo "EventBridge rule created and configured"
 ```
@@ -308,49 +357,47 @@ aws events put-rule \
 
 ---
 
-## Step 6: Create CloudWatch Alarms
+## Step 7: Create CloudWatch Alarms
 
 Use the same alarm configuration from the main deployment guide:
 
 ```bash
-# Replace YOUR-REGION, YOUR-ACCOUNT, and YOUR-TOPIC with your actual values
-REGION=$(aws configure get region)
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-SNS_TOPIC="arn:aws:sns:${REGION}:${ACCOUNT_ID}:YOUR-TOPIC-NAME"
+# Use the SNS topic ARN from Step 2
+# SNS_TOPIC_ARN should already be set from earlier
 
 # 1. OVERALL HEALTH ALARM: Triggers when ANY device goes offline
 aws cloudwatch put-metric-alarm \
-    --alarm-name "Snowball-Lambda-AnyOffline" \
-    --alarm-description "Alert when any Snowball device goes offline (Lambda)" \
+    --alarm-name "OnPrem-Lambda-AnyOffline" \
+    --alarm-description "Alert when any on-premises device goes offline (Lambda)" \
     --metric-name TotalOffline \
-    --namespace Snowball/MultiDevice \
+    --namespace OnPrem/MultiDevice \
     --statistic Maximum \
     --period 300 \
     --evaluation-periods 1 \
     --datapoints-to-alarm 1 \
     --threshold 0.5 \
     --comparison-operator GreaterThanThreshold \
-    --alarm-actions $SNS_TOPIC \
-    --ok-actions $SNS_TOPIC \
+    --alarm-actions $SNS_TOPIC_ARN \
+    --ok-actions $SNS_TOPIC_ARN \
     --treat-missing-data breaching
 
 # 2. LAMBDA HEALTH ALARM: Triggers when Lambda stops running
 aws cloudwatch put-metric-alarm \
-    --alarm-name "Snowball-Lambda-NotReporting" \
+    --alarm-name "OnPrem-Lambda-NotReporting" \
     --alarm-description "Alert when Lambda monitoring stops reporting" \
     --metric-name TotalDevices \
-    --namespace Snowball/MultiDevice \
+    --namespace OnPrem/MultiDevice \
     --statistic SampleCount \
     --period 900 \
     --evaluation-periods 2 \
     --threshold 1 \
     --comparison-operator LessThanThreshold \
     --treat-missing-data breaching \
-    --alarm-actions $SNS_TOPIC
+    --alarm-actions $SNS_TOPIC_ARN
 
 # 3. LAMBDA ERROR ALARM: Triggers on Lambda execution errors
 aws cloudwatch put-metric-alarm \
-    --alarm-name "Snowball-Lambda-Errors" \
+    --alarm-name "OnPrem-Lambda-Errors" \
     --alarm-description "Alert on Lambda function errors" \
     --metric-name Errors \
     --namespace AWS/Lambda \
@@ -359,8 +406,8 @@ aws cloudwatch put-metric-alarm \
     --evaluation-periods 1 \
     --threshold 0.5 \
     --comparison-operator GreaterThanThreshold \
-    --dimensions Name=FunctionName,Value=snowball-monitor \
-    --alarm-actions $SNS_TOPIC
+    --dimensions Name=FunctionName,Value=on-prem-monitor \
+    --alarm-actions $SNS_TOPIC_ARN
 ```
 
 ---

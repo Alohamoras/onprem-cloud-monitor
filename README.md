@@ -45,7 +45,7 @@ We provide five different implementation options, each with distinct advantages:
 - **Pros:** No servers to manage, scales automatically
 - **Cons:** VPC networking complexity, cold start delays
 
-[📖 View Lambda Documentation](./option-2-serverless/lamda-deployment-guide.md)
+[📖 View Lambda Documentation](./option-2-serverless/lambda-deployment-guide.md)
 
 ### Option 3: EC2 + Bash Script
 **Best for:** Most users, especially those new to AWS monitoring
