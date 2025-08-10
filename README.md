@@ -4,7 +4,7 @@ A simple, reliable monitoring solution for AWS customers who need immediate aler
 
 ## Quick Overview
 
-This project provides **four different approaches** to monitor your on-premises systems, each designed for different scenarios and technical requirements. All solutions focus on simplicity, reliability, and cost-effectiveness.
+This project provides **five different approaches** to monitor your on-premises systems, each designed for different scenarios and technical requirements. All solutions focus on simplicity, reliability, and cost-effectiveness.
 
 ### Core Features
 - ✅ **Real-time connectivity monitoring** - Know within minutes when systems go offline
@@ -13,6 +13,9 @@ This project provides **four different approaches** to monitor your on-premises 
 - ✅ **Cost-effective** - Solutions range from $5-50/month regardless of how many locations you monitor
 - ✅ **Production-ready** - Includes logging, error handling, and health monitoring
 
+> **⚠️ Important Network Dependency**  
+> Options 1-3 and 5 require network connectivity from your cloud monitoring component to the on-premises location. If this network connection fails, health checks will report the system as offline even if the on-premises equipment is functioning normally. This is expected behavior, but it's crucial to understand that network outages and system outages will both trigger alerts. Only Option 4 (On-Premises Only) is immune to cloud-to-premises network issues.
+
 ## Perfect For
 - **AWS customers** with on-premises locations needing uptime monitoring
 - **System administrators** who want immediate outage notifications  
@@ -20,7 +23,7 @@ This project provides **four different approaches** to monitor your on-premises 
 - **Organizations** valuing simplicity over complex monitoring platforms
 
 ## Monitoring Approaches
-We provide four different implementation options, each with distinct advantages:
+We provide five different implementation options, each with distinct advantages:
 
 ### Option 1: SSM Hybrid Agents
 **Best for:** Organizations already using AWS Systems Manager
@@ -66,6 +69,17 @@ We provide four different implementation options, each with distinct advantages:
 
 [📖 View On-Premises Documentation](./option-4-on-prem-only/README.md)
 
+### Option 5: Docker Container
+**Best for:** Containerized environments and maximum portability
+
+- **How it works:** Lightweight Docker container sending heartbeats to CloudWatch, can target other systems as well (see configuration)
+- **Cost:** ~$0.50/month per container
+- **Complexity:** Low - just Docker and environment variables
+- **Pros:** Runs anywhere Docker does, minimal resources, easy scaling
+- **Cons:** Requires Docker runtime, basic container knowledge
+
+[📖 View Docker Documentation](./option-5-docker/README.md)
+
 ## Quick Start
 
 1. **Choose your approach** based on your infrastructure and requirements
@@ -91,7 +105,7 @@ Option 4 uses direct SMTP for simpler, cloud-independent alerting.
 
 ## Why We Built This
 
-Existing monitoring solutions are either too complex (requiring dedicated teams) or too simple (just basic ping checks). We wanted something that:
+Existing monitoring solutions can be complex, costly, and overkill. We wanted something that:
 
 - **Just works** - Minimal setup, maximum reliability
 - **Scales simply** - Add new locations without architectural changes
