@@ -1,0 +1,37 @@
+{
+  "canaryName": "dev-onprem-monitor",
+  "monitoringFrequency": "rate(5 minutes)",
+  "vpcId": "vpc-12345678",
+  "subnetIds": ["subnet-12345678", "subnet-87654321"],
+  "onPremisesCIDR": "10.0.0.0/8",
+  "targetEndpoint": "10.1.1.100",
+  "targetPort": 80,
+  "notificationEmail": "devops-dev@company.com",
+  "escalationEmail": "oncall-dev@company.com",
+  "alarmThreshold": 2,
+  "escalationThreshold": 5,
+  "highLatencyThreshold": 5000,
+  "enableEscalation": true,
+  "artifactRetentionDays": 7,
+  "additionalTargets": [
+    {
+      "name": "api-health-check",
+      "type": "api",
+      "endpoint": "http://10.1.1.100:8080/health",
+      "timeout": 10000,
+      "retries": 3,
+      "retryDelay": 1000,
+      "expectedStatusCodes": [200],
+      "validateContent": true,
+      "expectedContentPattern": "healthy"
+    },
+    {
+      "name": "database-connectivity",
+      "type": "heartbeat",
+      "endpoint": "tcp://10.1.1.200:5432",
+      "timeout": 15000,
+      "retries": 2,
+      "retryDelay": 2000
+    }
+  ]
+}

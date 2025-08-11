@@ -1,0 +1,1107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudWatch Synthetics Canary Monitoring Solution for On-Premises Infrastructure'
+
+Parameters:
+  # Canary Configuration
+  CanaryName:
+    Type: String
+    Description: Name for the CloudWatch Synthetics canary
+    Default: on-premises-monitor
+    AllowedPattern: '^[a-zA-Z0-9_-]+$'
+    ConstraintDescription: Must contain only alphanumeric characters, hyphens, and underscores
+
+  MonitoringFrequency:
+    Type: String
+    Description: Frequency for canary execution (rate expression)
+    Default: 'rate(5 minutes)'
+    AllowedValues:
+      - 'rate(1 minute)'
+      - 'rate(5 minutes)'
+      - 'rate(10 minutes)'
+      - 'rate(15 minutes)'
+      - 'rate(30 minutes)'
+      - 'rate(1 hour)'
+
+  # Network Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where canaries will be deployed
+    
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for canary execution (should have route to on-premises)
+    
+  OnPremisesCIDR:
+    Type: String
+    Description: CIDR block for on-premises network
+    Default: '10.0.0.0/8'
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
+    ConstraintDescription: Must be a valid CIDR block
+
+  # Monitoring Targets
+  TargetEndpoint:
+    Type: String
+    Description: Primary on-premises endpoint to monitor
+    Default: '10.1.1.100'
+    
+  TargetPort:
+    Type: Number
+    Description: Port for connectivity testing
+    Default: 80
+    MinValue: 1
+    MaxValue: 65535
+
+  # Alerting Configuration  
+  NotificationEmail:
+    Type: String
+    Description: Email address for alarm notifications
+    AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    ConstraintDescription: Must be a valid email address
+
+  EscalationEmail:
+    Type: String
+    Description: Email address for escalated alarm notifications (optional)
+    Default: ''
+
+  SlackWebhookUrl:
+    Type: String
+    Description: Slack webhook URL for notifications (optional)
+    Default: ''
+    NoEcho: true
+
+  AlarmThreshold:
+    Type: Number
+    Description: Number of consecutive failures before alarm triggers
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+
+  EscalationThreshold:
+    Type: Number
+    Description: Number of consecutive failures before escalation triggers
+    Default: 5
+    MinValue: 2
+    MaxValue: 20
+
+  HighLatencyThreshold:
+    Type: Number
+    Description: Response time threshold in milliseconds for high latency alarms
+    Default: 5000
+    MinValue: 1000
+    MaxValue: 60000
+
+  EnableEscalation:
+    Type: String
+    Description: Enable escalation for multiple consecutive failures
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+  # Cost Optimization
+  ArtifactRetentionDays:
+    Type: Number
+    Description: Number of days to retain canary artifacts
+    Default: 30
+    MinValue: 1
+    MaxValue: 365
+
+Conditions:
+  EnableEscalationCondition: !Equals [!Ref EnableEscalation, 'true']
+  HasEscalationEmail: !And
+    - !Condition EnableEscalationCondition
+    - !Not [!Equals [!Ref EscalationEmail, '']]
+  HasSlackWebhook: !Not [!Equals [!Ref SlackWebhookUrl, '']]
+
+Resources:
+  # S3 Bucket for Canary Artifacts
+  CanaryArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-canary-artifacts-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldArtifacts
+            Status: Enabled
+            ExpirationInDays: !Ref ArtifactRetentionDays
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # IAM Role for Canary Execution
+  CanaryExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-canary-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: CanaryExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: !Sub '${CanaryArtifactsBucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Ref CanaryArtifactsBucket
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/cwsyn-*'
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'cloudwatch:namespace': 'CloudWatchSynthetics'
+
+  # Security Group for Canary
+  CanarySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${AWS::StackName}-canary-sg'
+      GroupDescription: Security group for CloudWatch Synthetics canaries
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: !Ref TargetPort
+          ToPort: !Ref TargetPort
+          CidrIp: !Ref OnPremisesCIDR
+          Description: Allow outbound traffic to on-premises endpoints
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+          Description: Allow HTTPS for AWS API calls
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: '0.0.0.0/0'
+          Description: Allow DNS resolution
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: '0.0.0.0/0'
+          Description: Allow DNS resolution
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-canary-security-group'
+
+  # SNS Topics for Notifications
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-canary-alarms'
+      DisplayName: CloudWatch Synthetics Canary Alarms
+      KmsMasterKeyId: alias/aws/sns
+      
+  EscalationNotificationTopic:
+    Type: AWS::SNS::Topic
+    Condition: EnableEscalationCondition
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-canary-escalation'
+      DisplayName: CloudWatch Synthetics Canary Escalation Alarms
+      KmsMasterKeyId: alias/aws/sns
+
+  # Primary notification subscriptions
+  AlarmNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      TopicArn: !Ref AlarmNotificationTopic
+      Endpoint: !Ref NotificationEmail
+
+  # Escalation notification subscription
+  EscalationNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasEscalationEmail
+    Properties:
+      Protocol: email
+      TopicArn: !Ref EscalationNotificationTopic
+      Endpoint: !Ref EscalationEmail
+
+  # Slack notification Lambda function
+  SlackNotificationFunction:
+    Type: AWS::Lambda::Function
+    Condition: HasSlackWebhook
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-slack-notifications'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt SlackNotificationRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+      Code:
+        ZipFile: |
+          import json
+          import urllib3
+          import os
+          from datetime import datetime
+
+          def lambda_handler(event, context):
+              webhook_url = os.environ['SLACK_WEBHOOK_URL']
+              
+              # Parse SNS message
+              message = json.loads(event['Records'][0]['Sns']['Message'])
+              
+              alarm_name = message.get('AlarmName', 'Unknown Alarm')
+              new_state = message.get('NewStateValue', 'UNKNOWN')
+              reason = message.get('NewStateReason', 'No reason provided')
+              timestamp = message.get('StateChangeTime', datetime.utcnow().isoformat())
+              
+              # Determine color based on alarm state
+              color = {
+                  'ALARM': '#FF0000',      # Red
+                  'OK': '#00FF00',         # Green
+                  'INSUFFICIENT_DATA': '#FFA500'  # Orange
+              }.get(new_state, '#808080')  # Gray for unknown
+              
+              # Create Slack message
+              slack_message = {
+                  "attachments": [
+                      {
+                          "color": color,
+                          "title": f"CloudWatch Alarm: {alarm_name}",
+                          "fields": [
+                              {
+                                  "title": "State",
+                                  "value": new_state,
+                                  "short": True
+                              },
+                              {
+                                  "title": "Timestamp",
+                                  "value": timestamp,
+                                  "short": True
+                              },
+                              {
+                                  "title": "Reason",
+                                  "value": reason,
+                                  "short": False
+                              }
+                          ],
+                          "footer": "AWS CloudWatch Synthetics",
+                          "ts": int(datetime.utcnow().timestamp())
+                      }
+                  ]
+              }
+              
+              # Send to Slack
+              http = urllib3.PoolManager()
+              response = http.request(
+                  'POST',
+                  webhook_url,
+                  body=json.dumps(slack_message),
+                  headers={'Content-Type': 'application/json'}
+              )
+              
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Notification sent to Slack')
+              }
+
+  SlackNotificationRole:
+    Type: AWS::IAM::Role
+    Condition: HasSlackWebhook
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  SlackNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasSlackWebhook
+    Properties:
+      Protocol: lambda
+      TopicArn: !Ref AlarmNotificationTopic
+      Endpoint: !GetAtt SlackNotificationFunction.Arn
+
+  SlackNotificationPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasSlackWebhook
+    Properties:
+      FunctionName: !Ref SlackNotificationFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref AlarmNotificationTopic
+
+  # Heartbeat Canary
+  HeartbeatCanary:
+    Type: AWS::Synthetics::Canary
+    Properties:
+      Name: !Sub '${CanaryName}-heartbeat'
+      ArtifactS3Location: !Sub 's3://${CanaryArtifactsBucket}/heartbeat-canary'
+      ExecutionRoleArn: !GetAtt CanaryExecutionRole.Arn
+      RuntimeVersion: 'syn-nodejs-puppeteer-6.2'
+      Schedule:
+        Expression: !Ref MonitoringFrequency
+        DurationInSeconds: 0
+      RunConfig:
+        TimeoutInSeconds: 60
+        MemoryInMB: 960
+        ActiveTracing: true
+        EnvironmentVariables:
+          TARGET_ENDPOINT: !Sub 'http://${TargetEndpoint}:${TargetPort}'
+          TIMEOUT: '30000'
+          RETRIES: '3'
+          RETRY_DELAY: '1000'
+          EXPECTED_STATUS_CODES: '200,201,202,204'
+          USER_AGENT: 'AWS-Synthetics-Heartbeat-Canary/1.0'
+      Code:
+        Handler: 'heartbeat-canary.handler'
+        Script: |
+          const synthetics = require('Synthetics');
+          const log = require('SyntheticsLogger');
+          const https = require('https');
+          const http = require('http');
+          const { URL } = require('url');
+
+          const heartbeatCheck = async function () {
+              const config = {
+                  endpoint: process.env.TARGET_ENDPOINT || 'http://localhost:8080',
+                  timeout: parseInt(process.env.TIMEOUT) || 30000,
+                  retries: parseInt(process.env.RETRIES) || 3,
+                  retryDelay: parseInt(process.env.RETRY_DELAY) || 1000,
+                  expectedStatusCodes: process.env.EXPECTED_STATUS_CODES ? 
+                      process.env.EXPECTED_STATUS_CODES.split(',').map(code => parseInt(code.trim())) : 
+                      [200, 201, 202, 204],
+                  userAgent: process.env.USER_AGENT || 'AWS-Synthetics-Heartbeat-Canary/1.0'
+              };
+
+              log.info('Starting heartbeat check with config:', JSON.stringify(config, null, 2));
+
+              return await synthetics.executeStep('heartbeat-connectivity-test', async function() {
+                  let lastError = null;
+                  
+                  for (let attempt = 1; attempt <= config.retries; attempt++) {
+                      try {
+                          log.info('Attempt ' + attempt + '/' + config.retries + ' - Testing connectivity to: ' + config.endpoint);
+                          
+                          const result = await performConnectivityTest(config);
+                          
+                          log.info('Heartbeat check successful on attempt ' + attempt, {
+                              endpoint: config.endpoint,
+                              responseTime: result.responseTime,
+                              statusCode: result.statusCode,
+                              attempt: attempt
+                          });
+
+                          await synthetics.addUserAgentMetric('HeartbeatSuccess', 1);
+                          await synthetics.addUserAgentMetric('ResponseTime', result.responseTime);
+                          await synthetics.addUserAgentMetric('AttemptsRequired', attempt);
+
+                          return result;
+                          
+                      } catch (error) {
+                          lastError = error;
+                          log.warn('Attempt ' + attempt + '/' + config.retries + ' failed:', error.message);
+                          
+                          await synthetics.addUserAgentMetric('HeartbeatFailure', 1);
+                          
+                          if (attempt < config.retries) {
+                              log.info('Waiting ' + config.retryDelay + 'ms before retry...');
+                              await sleep(config.retryDelay);
+                          }
+                      }
+                  }
+                  
+                  const errorMessage = 'Heartbeat check failed after ' + config.retries + ' attempts. Last error: ' + lastError.message;
+                  log.error(errorMessage);
+                  
+                  await synthetics.addUserAgentMetric('HeartbeatTotalFailure', 1);
+                  await synthetics.addUserAgentMetric('AttemptsRequired', config.retries);
+                  
+                  throw new Error(errorMessage);
+              });
+          };
+
+          async function performConnectivityTest(config) {
+              return new Promise((resolve, reject) => {
+                  const startTime = Date.now();
+                  
+                  try {
+                      const url = new URL(config.endpoint);
+                      const isHttps = url.protocol === 'https:';
+                      const client = isHttps ? https : http;
+                      
+                      const requestOptions = {
+                          hostname: url.hostname,
+                          port: url.port || (isHttps ? 443 : 80),
+                          path: url.pathname + url.search,
+                          method: 'GET',
+                          timeout: config.timeout,
+                          headers: {
+                              'User-Agent': config.userAgent,
+                              'Accept': '*/*',
+                              'Connection': 'close'
+                          }
+                      };
+
+                      const req = client.request(requestOptions, (res) => {
+                          const responseTime = Date.now() - startTime;
+                          
+                          if (config.expectedStatusCodes.includes(res.statusCode)) {
+                              resolve({
+                                  statusCode: res.statusCode,
+                                  responseTime: responseTime,
+                                  headers: res.headers
+                              });
+                          } else {
+                              reject(new Error('Unexpected status code: ' + res.statusCode + '. Expected one of: ' + config.expectedStatusCodes.join(', ')));
+                          }
+                          
+                          res.on('data', () => {});
+                          res.on('end', () => {});
+                      });
+
+                      req.on('error', (error) => {
+                          let errorType = 'UNKNOWN_ERROR';
+                          if (error.code === 'ECONNREFUSED') {
+                              errorType = 'CONNECTION_REFUSED';
+                          } else if (error.code === 'ENOTFOUND') {
+                              errorType = 'DNS_RESOLUTION_FAILED';
+                          } else if (error.code === 'ETIMEDOUT') {
+                              errorType = 'CONNECTION_TIMEOUT';
+                          } else if (error.code === 'ECONNRESET') {
+                              errorType = 'CONNECTION_RESET';
+                          }
+                          
+                          reject(new Error(errorType + ': ' + error.message));
+                      });
+
+                      req.on('timeout', () => {
+                          req.destroy();
+                          reject(new Error('REQUEST_TIMEOUT: Request timed out after ' + config.timeout + 'ms'));
+                      });
+
+                      req.end();
+                      
+                  } catch (error) {
+                      reject(new Error('REQUEST_SETUP_ERROR: ' + error.message));
+                  }
+              });
+          }
+
+          function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+          }
+
+          const handler = async () => {
+              return await synthetics.executeStep('canary', async function () {
+                  const syntheticsConfig = synthetics.getConfiguration();
+                  syntheticsConfig.setConfig({
+                      includeRequestHeaders: true,
+                      includeResponseHeaders: true,
+                      restrictedHeaders: [],
+                      restrictedUrlParameters: []
+                  });
+
+                  const result = await heartbeatCheck();
+                  
+                  log.info('Heartbeat canary completed successfully', result);
+                  return result;
+              });
+          };
+
+          exports.handler = handler;
+      VPCConfig:
+        VpcId: !Ref VpcId
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds:
+          - !Ref CanarySecurityGroup
+      StartCanaryAfterCreation: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-heartbeat-canary'
+        - Key: Type
+          Value: 'Heartbeat'
+
+  # API Canary for S3 Endpoint Testing
+  ApiCanary:
+    Type: AWS::Synthetics::Canary
+    Properties:
+      Name: !Sub '${CanaryName}-api'
+      ArtifactS3Location: !Sub 's3://${CanaryArtifactsBucket}/api-canary'
+      ExecutionRoleArn: !GetAtt CanaryExecutionRole.Arn
+      RuntimeVersion: 'syn-nodejs-puppeteer-6.2'
+      Schedule:
+        Expression: !Ref MonitoringFrequency
+        DurationInSeconds: 0
+      RunConfig:
+        TimeoutInSeconds: 60
+        MemoryInMB: 960
+        ActiveTracing: true
+        EnvironmentVariables:
+          API_ENDPOINT: !Sub 'http://${TargetEndpoint}:8080'
+          EXPECTED_STATUS: '200'
+          REQUEST_TIMEOUT: '10000'
+          RETRIES: '3'
+          RETRY_DELAY: '1000'
+          CUSTOM_HEADERS: '{}'
+          VALIDATE_CONTENT: 'false'
+          MAX_RESPONSE_SIZE: '1048576'
+          USER_AGENT: 'AWS-Synthetics-API-Canary/1.0'
+          FOLLOW_REDIRECTS: 'false'
+          MAX_REDIRECTS: '5'
+      Code:
+        Handler: 'api-canary.handler'
+        Script: |
+          const synthetics = require('Synthetics');
+          const log = require('SyntheticsLogger');
+          const https = require('https');
+          const http = require('http');
+          const { URL } = require('url');
+
+          const apiCheck = async function () {
+              const config = {
+                  apiEndpoint: process.env.API_ENDPOINT || 'http://localhost:8080',
+                  expectedStatusCode: parseInt(process.env.EXPECTED_STATUS) || 200,
+                  requestTimeout: parseInt(process.env.REQUEST_TIMEOUT) || 10000,
+                  retries: parseInt(process.env.RETRIES) || 3,
+                  retryDelay: parseInt(process.env.RETRY_DELAY) || 1000,
+                  customHeaders: parseCustomHeaders(process.env.CUSTOM_HEADERS),
+                  validateContent: process.env.VALIDATE_CONTENT === 'true',
+                  expectedContentPattern: process.env.EXPECTED_CONTENT_PATTERN || null,
+                  maxResponseSize: parseInt(process.env.MAX_RESPONSE_SIZE) || 1024 * 1024,
+                  userAgent: process.env.USER_AGENT || 'AWS-Synthetics-API-Canary/1.0',
+                  followRedirects: process.env.FOLLOW_REDIRECTS === 'true',
+                  maxRedirects: parseInt(process.env.MAX_REDIRECTS) || 5
+              };
+
+              return await synthetics.executeStep('api-endpoint-test', async function() {
+                  let lastError = null;
+                  
+                  for (let attempt = 1; attempt <= config.retries; attempt++) {
+                      try {
+                          const result = await performApiTest(config);
+                          
+                          await synthetics.addUserAgentMetric('ApiSuccess', 1);
+                          await synthetics.addUserAgentMetric('ApiResponseTime', result.responseTime);
+                          await synthetics.addUserAgentMetric('ApiContentLength', result.contentLength);
+                          await synthetics.addUserAgentMetric('AttemptsRequired', attempt);
+
+                          return result;
+                          
+                      } catch (error) {
+                          lastError = error;
+                          await synthetics.addUserAgentMetric('ApiFailure', 1);
+                          
+                          if (attempt < config.retries) {
+                              await sleep(config.retryDelay);
+                          }
+                      }
+                  }
+                  
+                  const errorMessage = 'API check failed after ' + config.retries + ' attempts. Last error: ' + lastError.message;
+                  await synthetics.addUserAgentMetric('ApiTotalFailure', 1);
+                  throw new Error(errorMessage);
+              });
+          };
+
+          async function performApiTest(config) {
+              return new Promise((resolve, reject) => {
+                  const startTime = Date.now();
+                  
+                  const url = new URL(config.apiEndpoint);
+                  const isHttps = url.protocol === 'https:';
+                  const client = isHttps ? https : http;
+                  
+                  const requestOptions = {
+                      hostname: url.hostname,
+                      port: url.port || (isHttps ? 443 : 80),
+                      path: url.pathname + url.search,
+                      method: 'GET',
+                      timeout: config.requestTimeout,
+                      headers: {
+                          'User-Agent': config.userAgent,
+                          'Accept': '*/*',
+                          'Connection': 'close'
+                      }
+                  };
+
+                  const req = client.request(requestOptions, (res) => {
+                      const responseTime = Date.now() - startTime;
+                      
+                      if (res.statusCode !== config.expectedStatusCode) {
+                          reject(new Error('Unexpected status code: ' + res.statusCode + '. Expected: ' + config.expectedStatusCode));
+                          return;
+                      }
+                      
+                      let contentLength = 0;
+                      res.on('data', (chunk) => {
+                          contentLength += chunk.length;
+                      });
+                      
+                      res.on('end', () => {
+                          resolve({
+                              statusCode: res.statusCode,
+                              responseTime: responseTime,
+                              contentLength: contentLength,
+                              headers: res.headers
+                          });
+                      });
+                  });
+
+                  req.on('error', (error) => {
+                      reject(new Error('REQUEST_ERROR: ' + error.message));
+                  });
+
+                  req.on('timeout', () => {
+                      req.destroy();
+                      reject(new Error('REQUEST_TIMEOUT: Request timed out after ' + config.requestTimeout + 'ms'));
+                  });
+
+                  req.end();
+              });
+          }
+
+          function parseCustomHeaders(headersString) {
+              if (!headersString) return {};
+              try {
+                  return JSON.parse(headersString);
+              } catch (error) {
+                  return {};
+              }
+          }
+
+          function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+          }
+
+          const handler = async () => {
+              return await synthetics.executeStep('canary', async function () {
+                  const result = await apiCheck();
+                  return result;
+              });
+          };
+
+          exports.handler = handler;
+      VPCConfig:
+        VpcId: !Ref VpcId
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds:
+          - !Ref CanarySecurityGroup
+      StartCanaryAfterCreation: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-api-canary'
+        - Key: Type
+          Value: 'API'
+
+  # CloudWatch Alarms for Heartbeat Canary
+  HeartbeatCanaryFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-heartbeat-canary-failure'
+      AlarmDescription: 'Alarm when heartbeat canary fails'
+      MetricName: 'Failed'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Sum'
+      Period: 300
+      EvaluationPeriods: !Ref AlarmThreshold
+      Threshold: 1
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref HeartbeatCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'breaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'Failure'
+        - Key: 'CanaryType'
+          Value: 'Heartbeat'
+
+  HeartbeatCanaryEscalationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: EnableEscalationCondition
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-heartbeat-canary-escalation'
+      AlarmDescription: 'Escalation alarm for multiple consecutive heartbeat canary failures'
+      MetricName: 'Failed'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Sum'
+      Period: 300
+      EvaluationPeriods: !Ref EscalationThreshold
+      Threshold: 1
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref HeartbeatCanary
+      AlarmActions:
+        - !Ref EscalationNotificationTopic
+      OKActions:
+        - !Ref EscalationNotificationTopic
+      TreatMissingData: 'breaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'Escalation'
+        - Key: 'CanaryType'
+          Value: 'Heartbeat'
+
+  HeartbeatCanaryDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-heartbeat-canary-duration'
+      AlarmDescription: 'Alarm when heartbeat canary takes too long'
+      MetricName: 'Duration'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Average'
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 45000
+      ComparisonOperator: 'GreaterThanThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref HeartbeatCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'notBreaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'Performance'
+        - Key: 'CanaryType'
+          Value: 'Heartbeat'
+
+  HeartbeatCanarySuccessRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-heartbeat-canary-success-rate'
+      AlarmDescription: 'Alarm when heartbeat canary success rate drops below threshold'
+      MetricName: 'SuccessPercent'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Average'
+      Period: 900
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: 'LessThanThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref HeartbeatCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'notBreaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'SuccessRate'
+        - Key: 'CanaryType'
+          Value: 'Heartbeat'
+
+  # CloudWatch Alarms for API Canary
+  ApiCanaryFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-canary-failure'
+      AlarmDescription: 'Alarm when API canary fails'
+      MetricName: 'Failed'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Sum'
+      Period: 300
+      EvaluationPeriods: !Ref AlarmThreshold
+      Threshold: 1
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref ApiCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'breaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'Failure'
+        - Key: 'CanaryType'
+          Value: 'API'
+
+  ApiCanaryEscalationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: EnableEscalationCondition
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-canary-escalation'
+      AlarmDescription: 'Escalation alarm for multiple consecutive API canary failures'
+      MetricName: 'Failed'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Sum'
+      Period: 300
+      EvaluationPeriods: !Ref EscalationThreshold
+      Threshold: 1
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref ApiCanary
+      AlarmActions:
+        - !Ref EscalationNotificationTopic
+      OKActions:
+        - !Ref EscalationNotificationTopic
+      TreatMissingData: 'breaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'Escalation'
+        - Key: 'CanaryType'
+          Value: 'API'
+
+  ApiCanaryDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-canary-duration'
+      AlarmDescription: 'Alarm when API canary takes too long'
+      MetricName: 'Duration'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Average'
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 45000
+      ComparisonOperator: 'GreaterThanThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref ApiCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'notBreaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'Performance'
+        - Key: 'CanaryType'
+          Value: 'API'
+
+  ApiCanarySuccessRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-canary-success-rate'
+      AlarmDescription: 'Alarm when API canary success rate drops below threshold'
+      MetricName: 'SuccessPercent'
+      Namespace: 'CloudWatchSynthetics'
+      Statistic: 'Average'
+      Period: 900
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: 'LessThanThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref ApiCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'notBreaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'SuccessRate'
+        - Key: 'CanaryType'
+          Value: 'API'
+
+  # Custom Metric Alarms for Enhanced Monitoring
+  HeartbeatHighLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-heartbeat-high-latency'
+      AlarmDescription: 'Alarm when heartbeat response time exceeds threshold'
+      MetricName: 'ResponseTime'
+      Namespace: 'CloudWatchSynthetics/UserAgentMetrics'
+      Statistic: 'Average'
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !Ref HighLatencyThreshold
+      ComparisonOperator: 'GreaterThanThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref HeartbeatCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'notBreaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'HighLatency'
+        - Key: 'CanaryType'
+          Value: 'Heartbeat'
+
+  ApiHighLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-api-high-latency'
+      AlarmDescription: 'Alarm when API response time exceeds threshold'
+      MetricName: 'ApiResponseTime'
+      Namespace: 'CloudWatchSynthetics/UserAgentMetrics'
+      Statistic: 'Average'
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !Ref HighLatencyThreshold
+      ComparisonOperator: 'GreaterThanThreshold'
+      Dimensions:
+        - Name: 'CanaryName'
+          Value: !Ref ApiCanary
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      TreatMissingData: 'notBreaching'
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'HighLatency'
+        - Key: 'CanaryType'
+          Value: 'API'
+
+  # Composite Alarm for Overall Health
+  OverallHealthCompositeAlarm:
+    Type: AWS::CloudWatch::CompositeAlarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-overall-health'
+      AlarmDescription: 'Composite alarm for overall canary health status'
+      AlarmRule: !Sub |
+        ALARM("${HeartbeatCanaryFailureAlarm}") OR 
+        ALARM("${ApiCanaryFailureAlarm}") OR 
+        ALARM("${HeartbeatCanaryDurationAlarm}") OR 
+        ALARM("${ApiCanaryDurationAlarm}")
+      AlarmActions:
+        - !Ref AlarmNotificationTopic
+      OKActions:
+        - !Ref AlarmNotificationTopic
+      Tags:
+        - Key: 'AlarmType'
+          Value: 'Composite'
+        - Key: 'CanaryType'
+          Value: 'Overall'
+
+  # CloudWatch Log Groups for Canaries
+  HeartbeatCanaryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/cwsyn-${HeartbeatCanary}'
+      RetentionInDays: !Ref ArtifactRetentionDays
+
+  ApiCanaryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/cwsyn-${ApiCanary}'
+      RetentionInDays: !Ref ArtifactRetentionDays
+
+Outputs:
+  CanaryArtifactsBucket:
+    Description: S3 bucket for storing canary artifacts
+    Value: !Ref CanaryArtifactsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-artifacts-bucket'
+      
+  CanaryExecutionRoleArn:
+    Description: ARN of the IAM role for canary execution
+    Value: !GetAtt CanaryExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-execution-role-arn'
+      
+  CanarySecurityGroupId:
+    Description: Security group ID for canaries
+    Value: !Ref CanarySecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-security-group-id'
+      
+  AlarmNotificationTopicArn:
+    Description: SNS topic ARN for alarm notifications
+    Value: !Ref AlarmNotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-notification-topic-arn'
+      
+  StackName:
+    Description: Name of this CloudFormation stack
+    Value: !Ref AWS::StackName
+    Export:
+      Name: !Sub '${AWS::StackName}-stack-name'
+
+  # Canary ARNs
+  HeartbeatCanaryArn:
+    Description: ARN of the heartbeat canary
+    Value: !GetAtt HeartbeatCanary.Id
+    Export:
+      Name: !Sub '${AWS::StackName}-heartbeat-canary-arn'
+
+  ApiCanaryArn:
+    Description: ARN of the API canary
+    Value: !GetAtt ApiCanary.Id
+    Export:
+      Name: !Sub '${AWS::StackName}-api-canary-arn'
+
+  # CloudWatch Log Groups
+  HeartbeatCanaryLogGroupName:
+    Description: CloudWatch log group name for heartbeat canary
+    Value: !Ref HeartbeatCanaryLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-heartbeat-log-group'
+
+  ApiCanaryLogGroupName:
+    Description: CloudWatch log group name for API canary
+    Value: !Ref ApiCanaryLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-api-log-group'
+
+  # Alarm ARNs
+  HeartbeatFailureAlarmArn:
+    Description: ARN of the heartbeat canary failure alarm
+    Value: !GetAtt HeartbeatCanaryFailureAlarm.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-heartbeat-failure-alarm-arn'
+
+  ApiFailureAlarmArn:
+    Description: ARN of the API canary failure alarm
+    Value: !GetAtt ApiCanaryFailureAlarm.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-api-failure-alarm-arn'
+
+  EscalationNotificationTopicArn:
+    Condition: EnableEscalationCondition
+    Description: ARN of the escalation notification topic
+    Value: !Ref EscalationNotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-escalation-topic-arn'
+
+  OverallHealthAlarmArn:
+    Description: ARN of the overall health composite alarm
+    Value: !GetAtt OverallHealthCompositeAlarm.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-overall-health-alarm-arn'
+
+  SlackNotificationFunctionArn:
+    Condition: HasSlackWebhook
+    Description: ARN of the Slack notification Lambda function
+    Value: !GetAtt SlackNotificationFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-slack-function-arn'

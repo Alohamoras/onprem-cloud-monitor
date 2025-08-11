@@ -1,0 +1,123 @@
+{
+  "alarmConfigurations": {
+    "failure": {
+      "description": "Alarm when canary fails",
+      "metricName": "Failed",
+      "namespace": "CloudWatchSynthetics",
+      "statistic": "Sum",
+      "period": 300,
+      "threshold": 1,
+      "comparisonOperator": "GreaterThanOrEqualToThreshold",
+      "treatMissingData": "breaching",
+      "evaluationPeriods": "configurable"
+    },
+    "escalation": {
+      "description": "Escalation alarm for multiple consecutive failures",
+      "metricName": "Failed",
+      "namespace": "CloudWatchSynthetics",
+      "statistic": "Sum",
+      "period": 300,
+      "threshold": 1,
+      "comparisonOperator": "GreaterThanOrEqualToThreshold",
+      "treatMissingData": "breaching",
+      "evaluationPeriods": "escalationThreshold"
+    },
+    "duration": {
+      "description": "Alarm when canary takes too long",
+      "metricName": "Duration",
+      "namespace": "CloudWatchSynthetics",
+      "statistic": "Average",
+      "period": 300,
+      "threshold": 45000,
+      "comparisonOperator": "GreaterThanThreshold",
+      "treatMissingData": "notBreaching",
+      "evaluationPeriods": 3
+    },
+    "successRate": {
+      "description": "Alarm when success rate drops below threshold",
+      "metricName": "SuccessPercent",
+      "namespace": "CloudWatchSynthetics",
+      "statistic": "Average",
+      "period": 900,
+      "threshold": 80,
+      "comparisonOperator": "LessThanThreshold",
+      "treatMissingData": "notBreaching",
+      "evaluationPeriods": 2
+    },
+    "highLatency": {
+      "description": "Alarm when response time exceeds threshold",
+      "metricName": "ResponseTime",
+      "namespace": "CloudWatchSynthetics/UserAgentMetrics",
+      "statistic": "Average",
+      "period": 300,
+      "threshold": "configurable",
+      "comparisonOperator": "GreaterThanThreshold",
+      "treatMissingData": "notBreaching",
+      "evaluationPeriods": 2
+    }
+  },
+  "notificationChannels": {
+    "email": {
+      "protocol": "email",
+      "required": true,
+      "description": "Primary email notification"
+    },
+    "escalationEmail": {
+      "protocol": "email",
+      "required": false,
+      "description": "Escalation email notification"
+    },
+    "slack": {
+      "protocol": "lambda",
+      "required": false,
+      "description": "Slack webhook notification"
+    },
+    "sms": {
+      "protocol": "sms",
+      "required": false,
+      "description": "SMS notification (future enhancement)"
+    }
+  },
+  "escalationRules": {
+    "enabled": true,
+    "thresholds": {
+      "warning": 2,
+      "critical": 5,
+      "emergency": 10
+    },
+    "actions": {
+      "warning": ["email"],
+      "critical": ["email", "escalationEmail"],
+      "emergency": ["email", "escalationEmail", "slack"]
+    }
+  },
+  "costOptimization": {
+    "alarmEvaluationFrequency": {
+      "standard": 300,
+      "highFrequency": 60,
+      "lowFrequency": 900
+    },
+    "dataRetention": {
+      "logs": 30,
+      "metrics": 90,
+      "artifacts": 30
+    },
+    "recommendations": {
+      "development": {
+        "frequency": "rate(15 minutes)",
+        "alarmThreshold": 3,
+        "escalationThreshold": 10
+      },
+      "staging": {
+        "frequency": "rate(10 minutes)",
+        "alarmThreshold": 2,
+        "escalationThreshold": 7
+      },
+      "production": {
+        "frequency": "rate(5 minutes)",
+        "alarmThreshold": 2,
+        "escalationThreshold": 5
+      }
+    }
+  }
+}

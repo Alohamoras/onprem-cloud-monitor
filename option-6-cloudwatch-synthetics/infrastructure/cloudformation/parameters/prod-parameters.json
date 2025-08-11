@@ -1,0 +1,62 @@
+[
+  {
+    "ParameterKey": "CanaryName",
+    "ParameterValue": "prod-on-premises-monitor"
+  },
+  {
+    "ParameterKey": "MonitoringFrequency", 
+    "ParameterValue": "rate(5 minutes)"
+  },
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-xxxxxxxxx"
+  },
+  {
+    "ParameterKey": "SubnetIds",
+    "ParameterValue": "subnet-xxxxxxxxx,subnet-yyyyyyyyy"
+  },
+  {
+    "ParameterKey": "OnPremisesCIDR",
+    "ParameterValue": "10.0.0.0/8"
+  },
+  {
+    "ParameterKey": "TargetEndpoint",
+    "ParameterValue": "10.1.1.100"
+  },
+  {
+    "ParameterKey": "TargetPort",
+    "ParameterValue": "80"
+  },
+  {
+    "ParameterKey": "NotificationEmail",
+    "ParameterValue": "ops-team@example.com"
+  },
+  {
+    "ParameterKey": "EscalationEmail",
+    "ParameterValue": "ops-manager@example.com"
+  },
+  {
+    "ParameterKey": "SlackWebhookUrl",
+    "ParameterValue": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+  },
+  {
+    "ParameterKey": "AlarmThreshold",
+    "ParameterValue": "2"
+  },
+  {
+    "ParameterKey": "EscalationThreshold",
+    "ParameterValue": "5"
+  },
+  {
+    "ParameterKey": "HighLatencyThreshold",
+    "ParameterValue": "5000"
+  },
+  {
+    "ParameterKey": "EnableEscalation",
+    "ParameterValue": "true"
+  },
+  {
+    "ParameterKey": "ArtifactRetentionDays",
+    "ParameterValue": "30"
+  }
+]

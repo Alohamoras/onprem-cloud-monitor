@@ -1,0 +1,29 @@
+{
+  "canaryName": "staging-onprem-monitor",
+  "monitoringFrequency": "rate(3 minutes)",
+  "vpcId": "vpc-staging123",
+  "subnetIds": ["subnet-staging12", "subnet-staging34"],
+  "onPremisesCIDR": "172.16.0.0/12",
+  "targetEndpoint": "172.16.1.100",
+  "targetPort": 80,
+  "notificationEmail": "devops-staging@company.com",
+  "alarmThreshold": 2,
+  "escalationThreshold": 4,
+  "highLatencyThreshold": 4000,
+  "enableEscalation": false,
+  "artifactRetentionDays": 14,
+  "additionalTargets": [
+    {
+      "name": "staging-api",
+      "type": "api",
+      "endpoint": "http://172.16.1.100:8080/api/health",
+      "timeout": 12000,
+      "retries": 3,
+      "retryDelay": 1500,
+      "expectedStatusCodes": [200],
+      "validateContent": true,
+      "expectedContentPattern": "status.*ok",
+      "maxResponseSize": 1048576
+    }
+  ]
+}

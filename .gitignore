@@ -78,3 +78,6 @@ terraform.tfvars.json
 tmp/
 temp/
 *.tmp
+
+# Kiro files
+*.kiro

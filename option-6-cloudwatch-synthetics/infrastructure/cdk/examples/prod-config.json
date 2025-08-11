@@ -1,0 +1,62 @@
+{
+  "canaryName": "prod-onprem-monitor",
+  "monitoringFrequency": "rate(2 minutes)",
+  "vpcId": "vpc-prod123456",
+  "subnetIds": ["subnet-prod1234", "subnet-prod5678", "subnet-prod9012"],
+  "onPremisesCIDR": "192.168.0.0/16",
+  "targetEndpoint": "192.168.1.100",
+  "targetPort": 443,
+  "notificationEmail": "devops-prod@company.com",
+  "escalationEmail": "oncall-prod@company.com",
+  "slackWebhookUrl": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+  "alarmThreshold": 1,
+  "escalationThreshold": 3,
+  "highLatencyThreshold": 3000,
+  "enableEscalation": true,
+  "artifactRetentionDays": 30,
+  "additionalTargets": [
+    {
+      "name": "primary-api",
+      "type": "api",
+      "endpoint": "https://192.168.1.100:8443/api/v1/status",
+      "timeout": 8000,
+      "retries": 3,
+      "retryDelay": 1000,
+      "expectedStatusCodes": [200],
+      "validateContent": true,
+      "expectedContentPattern": "/\"status\":\\s*\"ok\"/",
+      "customHeaders": {
+        "Authorization": "Bearer ${API_TOKEN}",
+        "X-Client-Version": "1.0"
+      },
+      "followRedirects": true,
+      "maxRedirects": 3
+    },
+    {
+      "name": "backup-api",
+      "type": "api",
+      "endpoint": "https://192.168.1.101:8443/api/v1/status",
+      "timeout": 8000,
+      "retries": 2,
+      "retryDelay": 2000,
+      "expectedStatusCodes": [200, 503],
+      "validateContent": false
+    },
+    {
+      "name": "database-primary",
+      "type": "heartbeat",
+      "endpoint": "tcp://192.168.1.200:5432",
+      "timeout": 10000,
+      "retries": 2,
+      "retryDelay": 1500
+    },
+    {
+      "name": "cache-cluster",
+      "type": "heartbeat",
+      "endpoint": "tcp://192.168.1.300:6379",
+      "timeout": 5000,
+      "retries": 3,
+      "retryDelay": 1000
+    }
+  ]
+}

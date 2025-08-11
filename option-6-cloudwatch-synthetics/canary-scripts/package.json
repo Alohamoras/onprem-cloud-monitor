@@ -1,0 +1,33 @@
+{
+  "name": "cloudwatch-synthetics-canary-scripts",
+  "version": "1.0.0",
+  "description": "AWS CloudWatch Synthetics canary scripts for on-premises monitoring",
+  "main": "heartbeat-canary.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test-heartbeat": "node test-heartbeat.js",
+    "test-api": "node test-api-canary.js",
+    "test-api-basic": "node test-api-canary.js basic",
+    "test-api-content": "node test-api-canary.js content"
+  },
+  "keywords": [
+    "aws",
+    "cloudwatch",
+    "synthetics",
+    "monitoring",
+    "heartbeat",
+    "api",
+    "s3",
+    "snowball",
+    "on-premises"
+  ],
+  "author": "AWS CloudWatch Synthetics",
+  "license": "MIT",
+  "dependencies": {
+    "Synthetics": "file:///opt/nodejs/node_modules/Synthetics",
+    "SyntheticsLogger": "file:///opt/nodejs/node_modules/SyntheticsLogger"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
